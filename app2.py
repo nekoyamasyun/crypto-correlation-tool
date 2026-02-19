@@ -66,7 +66,7 @@ with st.expander("ℹ️ このデータの抽出・計算ロジックについ�
         <h4>🛠️ アルゴリズムの仕組み</h4>
         <ol>
             <li><b>市場データの取得</b>: CoinGecko API(Demo Key使用)から指定セクターの銘柄リストを取得します。</li>
-            <li><b>クロスチェック</b>: 取得した銘柄のうち <b>Binance</b> で取引可能な銘柄のみを厳選します。</li>
+            <li><b>クロスチェック</b>: 取得した銘柄のうち <b>Bybit</b> で取引可能な銘柄のみを厳選します。</li>
             <li><b>時系列分析</b>: 相関係数、Zスコア、Slope(トレンド)をリアルタイム計算します。</li>
         </ol>
     </div>
@@ -106,7 +106,7 @@ Z_SCORE_ENTRY = st.sidebar.slider("Min Z-Score (絶対値)", 0.0, 5.0, 1.5, step
 MIN_WIN_RATE = st.sidebar.slider("Min Win Rate (%)", 0.0, 100.0, 55.0, step=1.0) / 100.0
 
 # ==========================================
-# 🧠 分析ロジック (APIキー対応版)
+# 🧠 分析ロジック (APIキー対応 & Bybit版)
 # ==========================================
 
 # 猫山さんの専用APIキー
@@ -146,10 +146,12 @@ def get_coingecko_data(limit, categories):
         return [], {}
 
 @st.cache_data(ttl=3600)
-def filter_binance_symbols(cg_symbols):
-    exchange = ccxt.binance()
+def filter_bybit_symbols(cg_symbols):
+    exchange = ccxt.bybit() # ← ここをBybitに変更！
     try: markets = exchange.load_markets()
-    except: return []
+    except Exception as e: 
+        st.error(f"取引所エラー: {e}") 
+        return []
     target = []
     for k in KINGS: 
         if k not in target: target.append(k)
@@ -160,7 +162,7 @@ def filter_binance_symbols(cg_symbols):
 
 @st.cache_data(ttl=600)
 def fetch_ohlcv_data(symbols, timeframe, limit):
-    exchange = ccxt.binance()
+    exchange = ccxt.bybit() # ← ここをBybitに変更！
     df_dict = {}
     bar = st.progress(0, text="Fetching Market Data...")
     for i, sym in enumerate(symbols):
@@ -168,7 +170,7 @@ def fetch_ohlcv_data(symbols, timeframe, limit):
             ohlcv = exchange.fetch_ohlcv(sym, timeframe=timeframe, limit=limit)
             closes = [x[4] for x in ohlcv]
             if len(closes) == limit: df_dict[sym] = closes
-            time.sleep(0.15) # クラウドの共有IP制限を考慮
+            time.sleep(0.1) # Bybitは少し制限が緩いので0.1秒に短縮
         except: pass
         if i % 10 == 0: bar.progress((i+1)/len(symbols), text=f"Processing: {sym}")
     bar.empty()
@@ -184,9 +186,13 @@ def calculate_slope_winrate(series):
 if st.button("最良の相関ペアを分析🎯", type="primary"):
     with st.spinner('Connecting to CoinGecko via Private Key...'):
         cg_symbols, cats_map = get_coingecko_data(TOP_MCAP, TARGET_CATEGORIES)
+        
+        # もしデータが0件なら、キャッシュを強制リセットする
+        if len(cg_symbols) == 0:
+            st.cache_data.clear()
     
     if cg_symbols:
-        target_symbols = filter_binance_symbols(cg_symbols)
+        target_symbols = filter_bybit_symbols(cg_symbols) # ← 関数名を変更
         st.success(f"Target Acquired: {len(target_symbols)} Assets")
         df = fetch_ohlcv_data(target_symbols, SELECTED_TIMEFRAME, LIMIT)
         
